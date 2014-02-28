@@ -64,11 +64,13 @@ mutual
     i-const : ∀ {G b} → G ⊢i (const b) ⇒ TBool
     i-var   : ∀ {G n t} → t ∈ G → G ⊢i (var n) ⇒ t
     i-app   : ∀ {G t t' e₁ e₂} → G ⊢i e₁ ⇒ (t ⇒ t') → G ⊢c e₂ ⇒ t → G ⊢i (app e₁ e₂) ⇒ t'
+    i-if    : ∀ {G t e e₁ e₂} → G ⊢c e ⇒ TBool → G ⊢i e₁ ⇒ t → G ⊢i e₂ ⇒ t → G ⊢i (if e e₁ e₂) ⇒ t
     i-ann   : ∀ {G e t} → G ⊢c e ⇒ t → G ⊢i (e ∶ t) ⇒ t
   
   data _⊢c_⇒_ : Gam → Term → Ty → Set where
     c-lam : ∀ {G t t' e} → (G ,, t) ⊢c e ⇒ t' → G ⊢c (lam e) ⇒ (t ⇒ t')
     c-if  : ∀ {G t e₁ e₂ e₃} → G ⊢c e₁ ⇒ TBool → G ⊢c e₂ ⇒ t → G ⊢c e₃ ⇒ t → G ⊢c (if e₁ e₂ e₃) ⇒ t
+    c-app : ∀ {G t t' e₁ e₂} → G ⊢i e₁ ⇒ (t ⇒ t') → G ⊢c e₂ ⇒ t → G ⊢c (app e₁ e₂) ⇒ t'
     c-ann : ∀ {G e t} → G ⊢i e ⇒ t → G ⊢c e ⇒ t
 
 erase-i : ∀ {G e t} → G ⊢i e ⇒ t → Term
@@ -99,7 +101,13 @@ mutual
   infer G (app e e₁) | ok .e (t ⇒ t₁) d₁ | ok .e₁ .t d = ok (app e e₁) t₁ (i-app d₁ d)
   infer G (app e e₁) | ok .e (t ⇒ t₁) d | bad .e₁ .t = bad (app e e₁)
   infer G (app e e₁) | bad .e = bad (app e e₁)
-  infer G (if e e₁ e₂) = bad (if e e₁ e₂)
+  infer G (if e e₁ e₂) with check G e TBool | infer G e₁ | infer G e₂ 
+  infer G (if e e₁ e₂) | ok .e .TBool d | ok .e₁ t d₁ | ok .e₂ t₁ d₂ with t ≡-ty t₁ 
+  infer G (if e e₁ e₂) | ok .e .TBool d | ok .e₁ .t₁ d₁ | ok .e₂ t₁ d₂ | yes refl = ok (if e e₁ e₂) t₁ (i-if d d₁ d₂)
+  infer G (if e e₁ e₂) | ok .e .TBool d | ok .e₁ t d₁ | ok .e₂ t₁ d₂ | no ¬p = bad (if e e₁ e₂)
+  infer G (if e e₁ e₂) | ok .e .TBool d | ok .e₁ t d₁ | bad .e₂ = bad (if e e₁ e₂)
+  infer G (if e e₁ e₂) | ok .e .TBool d | bad .e₁ | r = bad (if e e₁ e₂)
+  infer G (if e e₁ e₂) | bad .e .TBool | q | r = bad (if e e₁ e₂)
   infer G (e ∶ t) with check G e t
   infer G (e ∶ t) | ok .e .t d = ok (e ∶ t) t (i-ann d)
   infer G (e ∶ t) | bad .e .t = bad (e ∶ t)
@@ -119,9 +127,9 @@ mutual
   check G (lam e) (t ⇒ t₁) | bad .e .t₁ = bad (lam e) (t ⇒ t₁)
   check G (app e e₁) t with infer G e 
   check G (app e e₁) t₁ | ok .e TBool d = bad (app e e₁) t₁
-  check G (app e e₁) t₂ | ok .e (t ⇒ t₁) d with t ≡-ty t₂ | check G e₁ t 
-  check G (app e e₁) t₂ | ok .e (.t₂ ⇒ t₁) d₁ | yes refl | ok .e₁ .t₂ d = ok (app e e₁) t₂ {!!}
-  check G (app e e₁) t₂ | ok .e (.t₂ ⇒ t₁) d | yes refl | bad .e₁ .t₂ = bad (app e e₁) t₂
+  check G (app e e₁) t₂ | ok .e (t ⇒ t₁) d with t₁ ≡-ty t₂ | check G e₁ t 
+  check G (app e e₁) t₂ | ok .e (t ⇒ .t₂) d₁ | yes refl | ok .e₁ .t d = ok (app e e₁) t₂ (c-app d₁ d)
+  check G (app e e₁) t₂ | ok .e (t ⇒ t₁) d | yes p | bad .e₁ .t = bad (app e e₁) t₂
   check G (app e e₁) t₂ | ok .e (t ⇒ t₁) d | no ¬p | q = bad (app e e₁) t₂
   check G (app e e₁) t | bad .e = bad (app e e₁) t
   check G (if e e₁ e₂) t with check G e TBool | check G e₁ t | check G e₂ t 
